@@ -1,0 +1,156 @@
+best way to download bacdive (genomes and metabolic usage profiles) for a machine learning project
+
+My recommendation: BacDive API v2 + NCBI Datasets
+For your machine-learning project—predicting microbial growth and metabolic capabilities from genomes—I would use BacDive as the source of experimental phenotypes and NCBI as the source of genome sequences.
+
+This is substantially better than manually downloading BacDive CSV files.
+
+The good news is that BacDive made its API freely accessible without registration in February 2026. You can now retrieve its data directly using Python, without authentication.
+
+BacDive API v2 is particularly important because the older API is frozen at April 2025, while v2 includes newer data. BacDive API
+Recommended workflow
+Step	Data	Source	Method
+1	Experimental substrate utilization profiles	BacDive	API v2
+2	Strain-level genome accession numbers	BacDive	API v2
+3	Genome sequences (FASTA)	NCBI Assembly	NCBI Datasets CLI
+4	Genome annotations / protein sequences	NCBI or Bakta	NCBI Datasets or local annotation
+5	Genome-to-phenotype training dataset	Combined	Python / Parquet
+
+
+The most important point is to match genomes and metabolic profiles at the strain level, not just by species name.
+
+BacDive provides strain-specific records and genome assembly accessions, making it a useful resource for this purpose.
+
+The challenge is that not every strain with a metabolic profile has an available genome, and vice versa.
+1. Download all relevant BacDive records
+BacDive currently contains approximately 102,000 strains. Its website limits individual CSV export selections to 200 strains, so I would avoid the normal download interface for a large ML dataset. bacdive.de
+
+Instead, use two complementary interfaces:
+- SPARQL: discover the BacDive IDs of all strains.
+- REST API v2: download their complete records, up to 100 strains per request.
+A. Get all BacDive IDs
+Open the BacDive SPARQL interface.
+
+Try this query (the interface provides the d3o prefix):
+SELECT DISTINCT ?bacdive_id
+WHERE {
+    ?strain a d3o:Strain ;
+            d3o:hasBacDiveID ?bacdive_id .
+}
+ORDER BY ?bacdive_id
+
+Export the results as CSV, retaining all returned rows rather than just the first page.
+
+The SPARQL knowledge graph is a convenient way to enumerate IDs, although it may not be perfectly synchronized with the latest API release. sparql.dsmz.de
+B. Download the phenotype and genome metadata
+The API contains exactly the fields you need.
+
+For example, a record for Phaeobacter gallaeciensis contains:
+
+Metabolic utilization data:
+{
+  "Chebi-ID": 17634,
+  "metabolite": "D-glucose",
+  "utilization activity": "-",
+  "kind of utilization tested": "fermentation"
+}
+
+Genome metadata:
+{
+  "description": "ASM51138v1 assembly for Phaeobacter gallaeciensis DSM 26640",
+  "assembly level": "complete",
+  "INSDC accession": "GCA_000511385",
+  "NCBI tax ID": 1423144,
+  "score": 95.9
+}
+
+These are actual examples from BacDive's API v2 documentation. BacDive API
+
+The distinction between fermentation, assimilation, hydrolysis, and other utilization tests is important. You should not automatically interpret every positive utilization result as growth on that compound as the sole carbon source.
+C. Python extraction
+Assuming you've exported the SPARQL results to bacdive_ids.csv, the following script downloads the metadata and creates two tables.
+import csvimport reimport timeimport pandas as pdimport requestsfrom requests.adapters import HTTPAdapterfrom urllib3.util.retry import RetryBASE = "https://api.bacdive.dsmz.de/v2/fetch/"session = requests.Session()retry = Retry(    total=5,    backoff_factor=2,    status_forcelist=[429, 500, 502, 503, 504],)session.mount("https://", HTTPAdapter(max_retries=retry))def as_list(value):    if isinstance(value, list):        return value    if isinstance(value, dict):        return [value]    return []# IDs exported from the BacDive SPARQL interfacewith open("bacdive_ids.csv") as f:    rows = list(csv.DictReader(f))ids = sorted({    int(re.search(        r"\d+",        row.get("bacdive_id") or row.get("?bacdive_id")
+
+
+Dependencies:
+pip install requests pandas pyarrow
+
+This is based on the documented v2 response structure; I haven't executed a full database download. For production use, I would add resumable checkpoints and cache the raw JSON records.
+
+The two resulting tables preserve individual metabolic observations and genome accessions, rather than immediately collapsing them into a matrix.
+2. Download the genomes from NCBI
+Once you have those tables, you can restrict the download to strains that have both a genome and metabolic utilization measurements.
+import pandas as pdmet = pd.read_parquet("metabolism.parquet")genomes = pd.read_parquet("genomes.parquet")# Only strains with both metabolic observations and genomesmatched = set(met.bacdive_id) & set(genomes.bacdive_id)genomes = genomes[genomes.bacdive_id.isin(matched)]# Write the genome accession listgenomes.accession.dropna().drop_duplicates().to_csv(    "accessions.txt",    index=False,    header=False,)print("Matched strains:", len(matched))print("Genome accessions:", genomes.accession.nunique())
+
+
+Then use the official NCBI Datasets CLI.
+
+For large downloads:
+datasets download genome accession \
+    --inputfile accessions.txt \
+    --dehydrated \
+    --filename bacdive_genomes.zip
+
+unzip bacdive_genomes.zip -d bacdive_genomes
+
+datasets rehydrate --directory bacdive_genomes
+
+NCBI explicitly recommends the dehydrated/rehydrated workflow for downloads exceeding 1,000 assemblies or 15 GB. NCBI
+
+You can download genome sequences, protein sequences, and annotations. I would initially retrieve only genomic FASTA files, then decide whether existing annotations or standardized reannotation would be better for your model.
+3. Important considerations for ML
+I would pay particular attention to four issues.
+
+1. Missing values are not negative observations.
+
+If a strain has no entry for glucose utilization, that does not mean it cannot use glucose. Your phenotype matrix should therefore distinguish:
+Value	Interpretation
+1	Explicit positive
+0	Explicit negative
+NA	Untested or unknown
+Excluded	Ambiguous or conflicting result
+
+
+2. Preserve the experimental assay type.
+
+For example, glucose fermentation and glucose assimilation are distinct outcomes.
+
+I would create separate labels for different utilization categories rather than blindly combining all observations.
+
+3. Remove predicted phenotypes.
+
+BacDive includes genome-derived predictions, which would introduce circularity when training a genome-to-phenotype model.
+
+Fortunately, API v2 excludes AI predictions by default, and explicitly supports ?predictions=0. BacDive API
+
+4. Account for phylogenetic leakage.
+
+For a model intended to generalize to new organisms, splitting randomly by strain will give overly optimistic performance.
+
+I would evaluate performance using species-, genus-, and ideally family-held-out splits.
+4. How much useful training data can you expect?
+Although BacDive contains more than 100,000 strain records, the number with both genome sequences and useful metabolic utilization labels will be considerably smaller.
+
+I couldn't verify the precise intersection from the public statistics.
+
+I'd therefore calculate these quantities before downloading any sequences:
+1. Number of strains with metabolic utilization observations.
+2. Number with valid genome accessions.
+3. Number with both.
+4. Number of positive and negative observations per metabolite.
+5. Number of strains tested for at least 10, 20, 50, or 100 metabolites.
+That will tell you whether you have a useful multi-task learning dataset.
+
+For your specific goal of predicting microbial growth from genomes, there's one additional complication: BacDive primarily provides qualitative metabolic capabilities, not standardized growth rates or endpoint OD values.
+
+It is therefore better suited for pretraining a genome-to-metabolic-capability model than directly predicting growth yield in a defined minimal medium.
+Bottom line
+My preferred approach would be:
+
+BacDive SPARQL → BacDive API v2 → strain-level phenotype matrix → NCBI genome download → genome-to-metabolism model.
+
+Before downloading thousands of genomes, I would produce a coverage report to establish how many usable training examples actually exist.
+
+One further consideration: for an exhaustive database-scale extraction, it may be worth contacting the BacDive team to ask whether they provide a research-oriented bulk export. That could be easier than making thousands of API requests.
+
+Useful official resources: BacDive API documentation · BacDive API v2 JSON example · BacDive SPARQL interface.
