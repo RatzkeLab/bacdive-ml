@@ -94,7 +94,8 @@ VARIANTS = {
                                        shuffle=True),
 }
 HEAD_HID, HEAD_DROP, HEAD_LR, WD, P_IN = 64, 0.3, 1e-3, 1e-4, 0.2
-MAX_STEPS, EVAL_EVERY, PATIENCE, MIN_STEPS, FALLBACK_STEPS, VAL_FRAC = 400, 5, 50, 20, 100, 0.2
+# best inner-validation steps in the smoke test were ~20-45 for every variant
+MAX_STEPS, EVAL_EVERY, PATIENCE, MIN_STEPS, FALLBACK_STEPS, VAL_FRAC = 300, 5, 40, 20, 60, 0.2
 
 _D: dict = {}   # filled in the parent before the pool forks
 
@@ -203,6 +204,27 @@ class Head(nn.Module):
         return (self.f(torch.cat([ha, hb], 1)) - self.f(torch.cat([hb, ha], 1))).squeeze(-1)
 
 
+class SparseRows:
+    """Coalesced torch COO for a fixed set of rows, built once; input dropout is a mask on
+    the stored values (no re-sorting per step -- rebuilding cost ~1 s/step in the smoke test)."""
+
+    def __init__(self, X):
+        t = torch.sparse_coo_tensor(*_coo_parts(X)).coalesce()
+        self.idx, self.val, self.shape = t.indices(), t.values(), X.shape
+
+    def get(self, drop=0.0, gen=None):
+        val = self.val
+        if drop > 0:
+            val = val * ((torch.rand(val.shape, generator=gen) >= drop).float() / (1 - drop))
+        return torch.sparse_coo_tensor(self.idx, val, self.shape, is_coalesced=True)
+
+
+def _coo_parts(X):
+    c = X.tocoo()
+    return (torch.from_numpy(np.vstack([c.row, c.col]).astype(np.int64)),
+            torch.from_numpy(c.data.astype(np.float32)), X.shape)
+
+
 def make_encoder(d, init, seed):
     torch.manual_seed(seed)
     enc = Encoder(d["Xs"].shape[1])
@@ -224,9 +246,13 @@ def frozen_rep(d, v, seed, train_strains):
         enc = make_encoder(d, "random", seed)
         enc.eval()
         with torch.no_grad():
-            H = enc(to_torch(d["Xs"])).numpy()
+            H = enc(SparseRows(d["Xs"]).get()).numpy()
     mu = H[train_strains].mean(0)
-    sd = H[train_strains].std(0) + 1e-6
+    sd = H[train_strains].std(0)
+    # Floor the scale: many ReLU units are dead (sd ~ 0) on the training strains but fire on a
+    # test strain; dividing by ~1e-6 blew R^2 to -1e7 in the smoke test (same failure as the
+    # 16S PCA whitening in 20261113).
+    sd = np.maximum(sd, 0.1 * sd.mean() + 1e-6)
     return torch.from_numpy(((H - mu) / sd).astype(np.float32))
 
 
@@ -257,14 +283,17 @@ def run_variant(d, v, tr, val, te, seed, n_steps=None):
     loc[tr_strains] = np.arange(len(tr_strains))
     la, lb = torch.from_numpy(loc[ia[tr]]), torch.from_numpy(loc[ib[tr]])
     yt = torch.from_numpy(y[tr])
-    Xtr = d["Xs"][tr_strains]
+    gen = torch.Generator().manual_seed(seed)
+    if enc is not None:
+        Xtr_t = SparseRows(d["Xs"][tr_strains])
+        Xall_t = SparseRows(d["Xs"]).get()
 
     def all_embeddings():
         if enc is None:
             return H_fix
         enc.eval()
         with torch.no_grad():
-            return enc(to_torch(d["Xs"]))
+            return enc(Xall_t)
 
     def predict(idx):
         head.eval()
@@ -278,7 +307,7 @@ def run_variant(d, v, tr, val, te, seed, n_steps=None):
         head.train()
         if enc is not None:
             enc.train()
-            Ht = enc(to_torch(Xtr, P_IN, rng))
+            Ht = enc(Xtr_t.get(P_IN, gen))
         else:
             Ht = H_fix[torch.from_numpy(tr_strains)]
         loss = ((head(Ht[la], Ht[lb]) - yt) ** 2).mean()

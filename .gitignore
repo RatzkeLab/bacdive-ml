@@ -21,3 +21,4 @@ repDB*
 *.m8
 **/tmp/
 *.pyc
+*.jsonl
