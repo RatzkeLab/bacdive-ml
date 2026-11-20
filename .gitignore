@@ -19,7 +19,5 @@ repDB*
 *.log
 *.png
 *.m8
-**/tmp/**
-tmp/**
 **/tmp/
 *.pyc
