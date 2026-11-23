@@ -14,6 +14,7 @@ strains outside our ~300 genomes.
 | [06 Genomes (NCBI)](06_genomes_ncbi.md) | accession QC, RefSeq partners, pilot download, sizes |
 | [07 Gene-family features (MMseqs2)](07_gene_family_features.md) | gene calling + protein-family clustering pipeline, transfer coverage |
 | [08 Models](08_models.md) | evaluation protocol, baselines, MLP, CV regimes, gene-level sanity check, transfer to lab genomes |
+| [09 Interaction pretraining test](09_interaction_pretraining.md) | naive vs BacDive-pretrained MLP for genome → interaction, organism to family held out: **no detectable gain** |
 | [99 Decisions & TODO](99_decisions_and_todo.md) | decision log, open questions, deferred work (eggNOG) |
 
 ## Status (2026-11-20)
@@ -31,8 +32,10 @@ strains outside our ~300 genomes.
   - With only the strain held out, the regime that matches our strains: 0.74 (0.82).
   - The top-weighted genes are the textbook pathways (ara, xyl, rha, nar/nap, nir/nor/nos).
   - The multi-task MLP is slightly worse than logreg so far.
+- **Pretraining test (2026-11-23, [09](09_interaction_pretraining.md)):** BacDive pretraining did
+  not detectably improve interaction prediction at any held-out level, with MLP or logreg
+  profiles; family level is underpowered.
 - **Not started:**
-  - using the predictions in the interaction model
   - genome autoencoder
   - the eggNOG/KO route
 

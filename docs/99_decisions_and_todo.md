@@ -19,6 +19,9 @@
 | 2026-11-20 | report strain-out as the realistic regime for OUR strains | lab genomes sit closer to BacDive (median J 0.85) than even strain-out test strains (0.71) |
 | 2026-11-20 | s14 outputs keyed by **`strain_no`** (20261113 rule); id map in `s14_lab_genome_ids.csv` | user's convention in the interaction project; 1:1 over the 298 genome wells. Fixed a bug on the way: clone clusters were looked up by gbk stem, losing 38 Schulenburg genomes (124 → 162 attached) |
 | 2026-11-20 | taxonomy for lab strains comes from the genome, not the master sheet | s17: for 44 of 159 checkable strains the sheet's own Sanger 16S is a different organism from the genome (median 19% divergent), mostly invader clones ([08](08_models.md)) |
+| 2026-11-23 | do not adopt BacDive pretraining as the default for interaction models yet | fine-tuned − naive is within ±0.02 ρ at every held-out level; all CIs include 0 ([09](09_interaction_pretraining.md)) |
+| 2026-11-23 | judge pretraining with a taxon-level bootstrap, not SD across CV repeats | repeats reuse the same strains; family level has only 13–25 taxa |
+| 2026-11-23 | stop pursuing BacDive pretraining on the current interaction data | frozen logreg profiles also miss the pre-set gain rule (family +0.058, CI −0.022 to +0.258, Holm p 0.42; [09](09_interaction_pretraining.md)) |
 
 ## TODO
 
@@ -36,7 +39,13 @@
   not guaranteed feature-compatible.
 
 ### Next
-- [ ] **Transfer to the interaction model:** `outputs/s14_lab_profiles_logreg.csv` (351-d predicted
+- [x] (done 2026-11-23, s20: no detectable gain) frozen **logistic-regression** profiles
+  (`s14_lab_profiles_logreg.csv`) as the strain vector
+- [ ] Remaining pretraining follow-ups, only if still of interest:
+  - a slower, regularized fine-tuning recipe
+  - if a gain appears: repeat with the held-out taxa removed from BacDive pretraining too
+  - the family-level question needs more distinct families in the interaction data
+- [x] (done 2026-11-23: no detectable gain, see [09](09_interaction_pretraining.md)) **Transfer to the interaction model:** `outputs/s14_lab_profiles_logreg.csv` (351-d predicted
   phenotypes) and/or `s14_lab_embeddings_mlp.csv` as strain features in the 20261113 leak-free
   setup (organism-grouped folds, wrong-genome wells dropped). Compare against KO and 16S on the
   same folds. Files are keyed by `strain_no`; group folds by `clone_cluster`

@@ -80,6 +80,120 @@ trainability differ.
   built once, and dropout is applied as a mask on its values: ~0.35 s/step for a trainable
   encoder under load.
 
+- **Forked pool workers came up pinned to one physical core** (CPUs 0,32), although the parent
+  reported 0–63. The first full run put all 20 workers on one core, ~9% CPU each, and was stopped.
+  Fixed: a pool initializer resets the mask (`_init_worker`). Verified in a test pool: workers
+  keep 0–63 through a training step.
+
+## Status
+
+Run on 2026-11-23: 346 fold jobs × 8 variants, 78.5 min on 48 workers.
+
+```
+/home/rl/mambaforge/envs/karl_datasci/bin/python -u scripts/s18_interaction_pretraining.py --reps 10 --processes 48
+/home/rl/mambaforge/envs/karl_datasci/bin/python -u scripts/s19_pretraining_bootstrap.py --boots 2000 --processes 48
+```
+
 ## Results
 
-*(pending: full run with 10 repeats)*
+**Pretraining did not detectably help, at any level.** The hoped-for gain on unseen genera did
+not appear. Family level cannot be settled with this collection (the intervals are very wide).
+
+Spearman ρ on held-out taxa (mean over folds and 10 repeats). "Naive" and "fine-tuned" are each
+the mean of their two encoder learning rates, so no learning rate was picked after seeing test
+scores.
+
+| held out | 0907 naive | 0907 fine-tuned | 0907 frozen profiles | 0630 naive | 0630 fine-tuned | 0630 frozen profiles |
+|---|---|---|---|---|---|---|
+| organism | 0.748 | 0.761 | 0.790 | 0.773 | 0.761 | 0.750 |
+| species | 0.731 | 0.747 | 0.776 | 0.723 | 0.724 | 0.681 |
+| genus | 0.656 | 0.673 | 0.686 | 0.650 | 0.595 | 0.572 |
+| family | 0.536 | 0.541 | 0.611 | 0.365 | 0.385 | 0.429 |
+
+Difference from naive, both experiments combined, with a 95% CI from resampling **taxa**
+(`s19`, 2,000 draws):
+
+| held out | taxa | fine-tuned − naive | frozen profiles − naive |
+|---|---|---|---|
+| organism | 151 | 0.000 (−0.044 to +0.031) | +0.009 (−0.048 to +0.064) |
+| species | 117 | +0.008 (−0.046 to +0.049) | +0.001 (−0.059 to +0.067) |
+| genus | 42 | −0.019 (−0.108 to +0.078) | −0.024 (−0.133 to +0.090) |
+| family | 25 | +0.012 (−0.150 to +0.308) | +0.069 (−0.105 to +0.320) |
+
+All eight intervals include zero; Holm-adjusted p = 1.0 for all eight.
+
+![pretraining](../outputs/figures/s19_r10_pretraining.png)
+
+**Reading it:**
+- **Fine-tuning from BacDive ≈ training from scratch.** The combined difference is within ±0.02 ρ
+  at every level.
+- **Frozen phenotype profiles are the only arm with a hint.** At family level they are ahead in
+  both experiments (+0.075 and +0.064), but the interval is about −0.1 to +0.3. At genus the
+  experiments disagree (+0.030 in 0907, −0.078 in 0630).
+- **The frozen 256-d embedding is the weakest pretrained arm** (combined −0.04 to −0.11, n.s.).
+- **The naive MLP is already good:** ρ 0.75–0.77 with the organism held out, 0.72–0.73 species,
+  0.65 genus, 0.37–0.54 family. Organism-level performance is similar to 20261113's XGBoost
+  (0.78–0.81; different features and fold draws, so not a head-to-head).
+- **Controls:** shuffled labels score ρ ≈ −0.07 to +0.12. A frozen random encoder is close to naive
+  at organism and species level but worse at genus (−0.105, CI −0.195 to −0.025), so training the
+  encoder does add something once the taxon gap is large.
+
+**Limits of this test:**
+1. **Power at family level is low.** There are 25 families (13 in 0630) and Enterobacteriaceae
+   dominates. A real gain of +0.1 or more could be hidden. More CV repeats would not fix this;
+   more distinct families would.
+2. **"Unseen" means unseen by the interaction model only.** BacDive pretraining saw all these
+   taxa. That favours pretraining, and it still showed no gain. Holding the same taxa out of
+   pretraining has not been tested.
+3. **The training recipe was not tuned for transfer.** Early stopping chose only ~20–50 full-batch
+   steps (floor 20), so fine-tuning barely moves the encoder. A slower, more regularized recipe
+   could behave differently.
+4. **The pretrained encoder is the MLP**, which was slightly weaker than logistic regression on
+   BacDive (0.672 vs 0.680). The logistic-regression profiles are tested in the follow-up below.
+
+## Follow-up: frozen logistic-regression profiles (s20, 2026-11-23)
+
+**Question:** does swapping the MLP's 351 predicted phenotypes for logistic regression's
+(`s14_lab_profiles_logreg.csv`, fitted on BacDive genomes only) produce a gain on unseen taxa?
+
+**Design:** same pairs, folds, seeds, head, early stopping and z-scoring as the s18 frozen-profile
+arm. Probabilities are used as is, and no other transform was tried. **Decision rule, fixed before
+running:** a gain requires the combined logreg − naive 95% CI to exclude 0 at genus or family level
+after Holm correction over the 4 levels.
+
+**Reproduction checks passed:** the re-run MLP-profile arm matches s18's 12,919 saved predictions
+(max difference 8e-7, identical step counts), and all 60 s19 contrasts are reproduced.
+
+**Result: no detectable gain; the decision rule is not met.**
+
+Spearman ρ on held-out taxa:
+
+| held out | 0907 naive | 0907 MLP profiles | 0907 logreg profiles | 0630 naive | 0630 MLP profiles | 0630 logreg profiles |
+|---|---|---|---|---|---|---|
+| organism | 0.748 | 0.790 | 0.776 | 0.773 | 0.750 | 0.738 |
+| species | 0.731 | 0.776 | 0.762 | 0.723 | 0.681 | 0.701 |
+| genus | 0.656 | 0.686 | 0.678 | 0.650 | 0.572 | 0.606 |
+| family | 0.536 | 0.611 | 0.570 | 0.365 | 0.429 | 0.448 |
+
+Logreg profiles − naive, both experiments combined (95% CI from resampling taxa, 2,000 draws):
+
+| held out | taxa | logreg − naive | Holm p |
+|---|---|---|---|
+| organism | 151 | −0.004 (−0.055 to +0.055) | 1.0 |
+| species | 117 | +0.004 (−0.057 to +0.062) | 1.0 |
+| genus | 42 | −0.011 (−0.090 to +0.105) | 1.0 |
+| family | 25 | +0.058 (−0.022 to +0.258) | 0.42 |
+
+**Reading it:**
+- Logreg profiles are indistinguishable from MLP profiles (combined difference −0.013 to +0.013).
+- Family level is again ahead in both experiments (+0.033 and +0.083), as with the MLP profiles.
+  It remains a hint only. The two profile arms share the same labels and genomes, so they are not
+  independent evidence.
+- **Conclusion:** stop pursuing BacDive pretraining with this interaction dataset. The family-level
+  question needs more distinct families, not another model variant.
+
+**Files:**
+- `outputs/s18_r10_{predictions.csv.gz,fold_metrics.csv,summary.csv}`
+- `outputs/s19_r10_{bootstrap.csv,rho_by_level.csv,summary.json}`
+- `outputs/s20_r10_{predictions.csv.gz,rho_by_level.csv,bootstrap.csv}`
+- `outputs/figures/s19_r10_pretraining.png`

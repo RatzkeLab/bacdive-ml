@@ -343,6 +343,13 @@ def inner_split(d, level, tr, seed):
     return None, None
 
 
+def _init_worker():
+    """Forked workers came up pinned to ONE physical core (CPUs 0,32) although the parent
+    reports 0-63 -- 20 workers shared one core (first full run, 2026-11-21). Reset the mask."""
+    os.sched_setaffinity(0, range(os.cpu_count()))
+    torch.set_num_threads(1)
+
+
 def run_job(job):
     torch.set_num_threads(1)
     d = _D[job["exp"]]
@@ -441,7 +448,7 @@ def main() -> None:
     # big (slow) jobs first for better packing
     jobs.sort(key=lambda j: -len(j["train"]))
     parts = []
-    with get_context("fork").Pool(a.processes) as pool:
+    with get_context("fork").Pool(a.processes, initializer=_init_worker) as pool:
         for i, part in enumerate(pool.imap_unordered(run_job, jobs, chunksize=1), 1):
             parts.append(part)
             if i % 20 == 0 or i == len(jobs):

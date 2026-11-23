@@ -30,6 +30,9 @@ Use env `karl_datasci` unless noted: `/home/rl/mambaforge/envs/karl_datasci/bin/
 | `s15_interpret_families.py` | top-weighted families named via Swiss-Prot | 1 min |
 | `s16_summary_figure.py` | AUROC by CV regime figure | s |
 | `s17_sheet_taxonomy_check.py` | lab genomes' nearest BacDive genus vs the master sheet's 16S taxonomy | s |
+| `s18_interaction_pretraining.py` | naive vs BacDive-pretrained MLP for genome → interaction, organism/species/genus/family held out | 80 min |
+| `s19_pretraining_bootstrap.py` | taxon-level bootstrap CIs and figure for s18 | 10 s |
+| `s20_logreg_profiles.py` | follow-up: frozen logreg BacDive profiles on s18's folds, with reproduction checks | 30 s |
 
 ## Headline numbers
 
@@ -42,3 +45,5 @@ Use env `karl_datasci` unless noted: `/home/rl/mambaforge/envs/karl_datasci/bin/
 | taxonomy-only AUROC (median), strain out / genus out | 0.68 / 0.62 |
 | genome (MMseqs2 families, logreg) AUROC, genus out: all / ≥100 per class | **0.68 / 0.74** (taxonomy 0.61 / 0.64) |
 | same, strain out (the regime matching our strains) | **0.74 / 0.82** |
+| BacDive pretraining → interaction model, Δρ vs naive (genus / family held out) | −0.02 / +0.01, CIs include 0: **no detectable gain** |
+| frozen logreg BacDive profiles, Δρ vs naive (genus / family held out) | −0.01 / +0.06, CIs include 0: **no detectable gain** |
