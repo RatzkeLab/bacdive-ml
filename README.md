@@ -3,6 +3,10 @@
 Pretrain a genome → metabolic-capability model on BacDive (11k strains with genome + phenotype
 labels). Then reuse it as strain features for the pairwise-interaction model.
 
+**Status (2026-11-27): shelved.** ~51 GB of regenerable data (genomes, proteins, MMseqs2 DBs,
+family matrix, MLP weights, logs) was deleted; see [data/DELETED_DATA.md](data/DELETED_DATA.md)
+for what is gone and how to rebuild it. Results, docs and small tables are kept.
+
 **Documentation:** [docs/00_index.md](docs/00_index.md) is the mini-wiki home (data, labels,
 results, decisions, TODO).
 

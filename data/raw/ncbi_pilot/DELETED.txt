@@ -1,0 +1,1 @@
+Large files in this folder were deleted on 2026-11-27 (project shelved). See bacdive-ml/data/DELETED_DATA.md for what was here and how to regenerate it.
