@@ -1,0 +1,1 @@
+BacDive API snapshot (2,601 gz batches, Nov 2026, 117 MB) deleted on 2026-11-27. See bacdive-ml/data/DELETED_DATA.md for how to regenerate it.
